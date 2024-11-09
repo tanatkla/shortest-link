@@ -1,0 +1,15 @@
+services:
+  main:
+    container_name: "shortest-link"
+    build:
+      context: .
+      network: host
+      dockerfile: Dockerfile.production
+      args:
+        - NGINX_LISTEN_PORT=11183
+        - LARAVEL_HORIZON_ENABLE=no
+        - LARAVEL_SCHEDULE_ENABLE=yes
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./storage/app:/var/www/html/storage/app

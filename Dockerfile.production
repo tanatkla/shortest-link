@@ -1,0 +1,70 @@
+FROM composer:2.7 as vendor
+
+COPY database database
+COPY composer.json composer.json
+COPY composer.lock composer.lock
+
+RUN composer install \
+    --ignore-platform-reqs \
+    --no-interaction \
+    --no-plugins \
+    --no-scripts \
+    --prefer-dist \
+    --optimize-autoloader \
+    --no-dev
+
+FROM kla/nginx-php-fpm:8.2-main
+
+ARG UID=1000
+ARG GID=1000
+ARG USER=laravel
+ARG GROUP=laravel
+ARG WORKDIR=/var/www/html
+
+ARG NGINX_WORKER_PROCESSES=auto
+ARG NGINX_LISTEN_PORT=8080
+ENV NGINX_LISTEN_PORT=${NGINX_LISTEN_PORT}
+ARG NGINX_ROOT_DIRECTORY=/var/www/html/public
+ARG PHP_FPM_MAX_CHILDREN=16
+ARG LARAVEL_HORIZON_ENABLE=no
+ARG LARAVEL_SCHEDULE_ENABLE=no
+
+RUN apk add --no-cache \
+    cairo-dev \
+    pango-dev \
+    jpeg-dev \
+    giflib-dev \
+    librsvg-dev \
+    build-base \
+    nodejs \
+    npm \
+    chromium \
+    udev \
+    ttf-freefont \
+    fontconfig
+
+RUN usermod -u ${UID} ${USER} \
+    && groupmod -g ${GID} ${GROUP} \
+    && chown -R ${USER}:${GROUP} /run ${WORKDIR} /var/lib/nginx /var/log/nginx
+
+RUN sed -i -r "s!worker_processes\s+(auto|\d+);!worker_processes $NGINX_WORKER_PROCESSES;!g" /etc/nginx/nginx.conf \
+    && sed -i -r "s!listen\s+(\[::\]:)?(\d+)\s+default_server;!listen \1${NGINX_LISTEN_PORT} default_server;!g" /etc/nginx/nginx.conf \
+    && sed -i -r "s!root\s+(.+);!root ${NGINX_ROOT_DIRECTORY};!g" /etc/nginx/nginx.conf \
+    && sed -i -r "s!pm\.max_children\s*=\s*(\d+)!pm.max_children = $PHP_FPM_MAX_CHILDREN!g" /etc/php82/php-fpm.d/www.conf
+
+RUN if [ "${LARAVEL_HORIZON_ENABLE}" = "yes" ]; then \
+        cp -f /etc/supervisor.d/horizon.stub /etc/supervisor.d/horizon.ini \
+    ; fi
+
+RUN if [ "${LARAVEL_SCHEDULE_ENABLE}" = "yes" ]; then \
+        cp -f /etc/supervisor.d/crond.stub /etc/supervisor.d/crond.ini \
+        && echo "* * * * * /usr/bin/php ${WORKDIR}/artisan schedule:run >> /dev/null 2>&1" >> "/var/spool/cron/crontabs/${USER}" \
+    ; fi
+
+COPY --chown=${USER}:${GROUP} . ${WORKDIR}
+COPY --from=vendor --chown=${USER}:${GROUP} /app/vendor/ ${WORKDIR}/vendor/
+
+USER laravel
+
+RUN npm install --prefix ${WORKDIR}
+RUN php artisan package:discover --ansi && php artisan cache:clear && php artisan optimize && php artisan storage:link

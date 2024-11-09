@@ -1,0 +1,18 @@
+services:
+  main:
+    container_name: "shortest-link"
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      args:
+        - NGINX_LISTEN_PORT=11183
+    ports:
+      - 11183:11183
+    volumes:
+      - .:/var/www/html
+    networks:
+      - docker-main
+    restart: on-failure
+networks:
+  docker-main:
+    external: true
